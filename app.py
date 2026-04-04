@@ -306,26 +306,63 @@ if page == "📝 模擬測驗":
             st.rerun()
 
 # ==========================================
-# 頁面 B：錯題統計 
+# 頁面 B：錯題統計 (加入全體考生統計)
 # ==========================================
 elif page == "📈 錯題統計":
-    st.title(f"📈 {st.session_state.username} 的錯題分析")
+    st.title("📈 錯題統計與分析")
     
-    user_history_df = get_user_history(st.session_state.username)
+    # 使用 Tabs 切換個人與全體數據
+    tab_personal, tab_global = st.tabs(["👤 我的錯題", "🌍 全體考生易錯排行榜"])
     
-    if user_history_df.empty:
-        st.info("💡 您尚未有作答紀錄，趕快去測試一下吧！")
-    else:
-        user_history_df['總次數'] = user_history_df['答對次數'] + user_history_df['答錯次數']
-        user_history_df['錯誤率(%)'] = (user_history_df['答錯次數'] / user_history_df['總次數'] * 100).round(1)
-        wrong_df = user_history_df[user_history_df['答錯次數'] > 0].sort_values(by=['答錯次數', '錯誤率(%)'], ascending=[False, False])
+    # -------------------------
+    # 分頁 1：個人錯題
+    # -------------------------
+    with tab_personal:
+        st.subheader(f"📊 {st.session_state.username} 的專屬錯題分析")
+        user_history_df = get_user_history(st.session_state.username)
         
-        if wrong_df.empty:
-            st.success("太強了！您目前的作答紀錄中沒有任何錯題 🎉")
+        if user_history_df.empty:
+            st.info("💡 您尚未有作答紀錄，趕快去測試一下吧！")
         else:
-            st.subheader("📊 錯題 Top 10")
-            chart_data = wrong_df.head(10).copy()
-            chart_data['題目'] = chart_data['題幹'].str.slice(0, 15) + "..."
-            st.bar_chart(chart_data.set_index('題目')[['答錯次數', '答對次數']], color=["#ff4b4b", "#00cc96"])
+            user_history_df['總次數'] = user_history_df['答對次數'] + user_history_df['答錯次數']
+            user_history_df['錯誤率(%)'] = (user_history_df['答錯次數'] / user_history_df['總次數'] * 100).round(1)
+            wrong_df = user_history_df[user_history_df['答錯次數'] > 0].sort_values(by=['答錯次數', '錯誤率(%)'], ascending=[False, False])
             
-            st.dataframe(wrong_df[['題幹', '答錯次數', '答對次數', '錯誤率(%)']].reset_index(drop=True), use_container_width=True)
+            if wrong_df.empty:
+                st.success("太強了！您目前的作答紀錄中沒有任何錯題 🎉")
+            else:
+                chart_data = wrong_df.head(10).copy()
+                chart_data['題目'] = chart_data['題幹'].str.slice(0, 15) + "..."
+                st.bar_chart(chart_data.set_index('題目')[['答錯次數', '答對次數']], color=["#ff4b4b", "#00cc96"])
+                st.dataframe(wrong_df[['題幹', '答錯次數', '答對次數', '錯誤率(%)']].reset_index(drop=True), use_container_width=True)
+
+    # -------------------------
+    # 分頁 2：全體考生錯題
+    # -------------------------
+    with tab_global:
+        st.subheader("🔥 系統全體考生大數據分析")
+        all_history_df = load_all_history()
+        
+        if all_history_df.empty:
+            st.info("💡 系統目前尚無任何考生的作答紀錄！")
+        else:
+            # 💡 核心邏輯：將所有帳號的數據，依照「題幹」進行分組加總
+            global_df = all_history_df.groupby('題幹', as_index=False)[['答對次數', '答錯次數']].sum()
+            
+            # 計算全體的總次數與錯誤率
+            global_df['總次數'] = global_df['答對次數'] + global_df['答錯次數']
+            global_df['錯誤率(%)'] = (global_df['答錯次數'] / global_df['總次數'] * 100).round(1)
+            
+            # 篩選出至少有一人答錯的題目，並依答錯總數排序
+            wrong_global_df = global_df[global_df['答錯次數'] > 0].sort_values(by=['答錯次數', '錯誤率(%)'], ascending=[False, False])
+            
+            if wrong_global_df.empty:
+                st.success("太不可思議了！目前全體考生都沒有出現任何錯題 🎉")
+            else:
+                st.markdown("以下是所有使用者累積下來的 **「魔王題排行榜」**：")
+                
+                chart_data_g = wrong_global_df.head(10).copy()
+                chart_data_g['題目'] = chart_data_g['題幹'].str.slice(0, 15) + "..."
+                st.bar_chart(chart_data_g.set_index('題目')[['答錯次數', '答對次數']], color=["#ff4b4b", "#00cc96"])
+                
+                st.dataframe(wrong_global_df[['題幹', '答錯次數', '答對次數', '錯誤率(%)']].reset_index(drop=True), use_container_width=True)
