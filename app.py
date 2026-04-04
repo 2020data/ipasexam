@@ -4,7 +4,7 @@ import random
 import os
 import string
 import smtplib
-import hashlib # 👈 引入雜湊加密模組
+import hashlib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
@@ -14,26 +14,28 @@ st.set_page_config(page_title="AI 應用規劃師 - 智能複習系統", layout=
 # ==========================================
 # 檔案設定：隱藏帳號檔與歷史紀錄
 # ==========================================
-# 💡 安全升級 1：在檔名前加上小數點 '.'，使其在系統中成為隱藏檔
 USER_FILE = ".users_secure.csv" 
 HISTORY_FILE = "quiz_history.csv"
 
 # ==========================================
-# 安全升級 2：讀取隱藏的 Gmail 寄件憑證
+# 讀取信箱機密設定 (支援 secrets.toml)
 # ==========================================
 try:
     SENDER_EMAIL = st.secrets["email"]["sender_email"]
     SENDER_PASSWORD = st.secrets["email"]["sender_password"]
 except Exception:
-    st.error("⚠️ 找不到 secrets.toml，請先設定寄件者憑證。")
-    st.stop()
+    # 若找不到 secrets.toml，給予預設值防呆 (但會無法寄信)
+    SENDER_EMAIL = "your_email@gmail.com"
+    SENDER_PASSWORD = "your_app_password"
 
 # --- 密碼加密函數 (SHA-256) ---
-# 💡 安全升級 3：將密碼轉換為不可逆的雜湊值，不儲存明文
 def hash_password(password):
     return hashlib.sha256(str(password).encode('utf-8')).hexdigest()
 
 def send_registration_email(to_email, password):
+    if SENDER_EMAIL == "your_email@gmail.com":
+        return False, "尚未設定有效的寄件者信箱與密碼。"
+
     msg = MIMEMultipart()
     msg['From'] = SENDER_EMAIL
     msg['To'] = to_email
@@ -72,11 +74,19 @@ def load_users():
 
 def save_user(username, password):
     df = load_users()
-    # 儲存前先將密碼加密
     hashed_pw = hash_password(password)
     new_user = pd.DataFrame([{"帳號": username, "密碼": hashed_pw}])
     df = pd.concat([df, new_user], ignore_index=True)
     df.to_csv(USER_FILE, index=False)
+
+# 💡 新增：自動初始化預設帳號 (student / ipas8888)
+def init_default_user():
+    df = load_users()
+    if "student" not in df["帳號"].values:
+        hashed_pw = hash_password("ipas8888")
+        new_user = pd.DataFrame([{"帳號": "student", "密碼": hashed_pw}])
+        df = pd.concat([df, new_user], ignore_index=True)
+        df.to_csv(USER_FILE, index=False)
 
 def load_all_history():
     if os.path.exists(HISTORY_FILE):
@@ -87,6 +97,11 @@ def load_all_history():
 def get_user_history(username):
     df = load_all_history()
     return df[df["帳號"] == username].copy()
+
+# ==========================================
+# 0. 啟動時自動建立預設帳號
+# ==========================================
+init_default_user()
 
 # ==========================================
 # 1. 系統狀態初始化
@@ -108,14 +123,16 @@ if 'history_saved' not in st.session_state:
 if not st.session_state.logged_in:
     st.title("🔐 考生登入系統")
     
+    # 在登入頁面提示預設帳號
+    st.info("💡 測試專用預設帳號：`student` ／ 密碼：`ipas8888`")
+    
     tab_login, tab_register = st.tabs(["🔑 會員登入", "📝 註冊新帳號"])
     
     with tab_login:
-        l_user = st.text_input("登入信箱 (帳號)", key="login_user")
+        l_user = st.text_input("登入信箱 (或預設帳號)", key="login_user")
         l_pw = st.text_input("密碼", type="password", key="login_pw")
         if st.button("登入"):
             users_df = load_users()
-            # 登入時，將輸入的密碼加密後，再去跟資料庫裡的加密亂碼比對
             hashed_input_pw = hash_password(l_pw)
             match = users_df[(users_df["帳號"].astype(str) == str(l_user)) & (users_df["密碼"].astype(str) == str(hashed_input_pw))]
             
@@ -142,7 +159,9 @@ if not st.session_state.logged_in:
             else:
                 users_df = load_users()
                 if r_user in users_df["帳號"].values:
-                    st.error("⚠️ 此信箱已被註冊過，請換一個或直接登入！")
+                    st.error("⚠️ 此帳號已被註冊過，請換一個或直接登入！")
+                elif r_user == "student":
+                    st.error("⚠️ 預設帳號名稱無法註冊！")
                 else:
                     final_pw = r_pw if pwd_mode == "自行設定" else generate_random_password()
                     if not final_pw:
@@ -151,7 +170,6 @@ if not st.session_state.logged_in:
                         with st.spinner("建立帳號並寄送信件中..."):
                             success, msg = send_registration_email(r_user, final_pw)
                             if success:
-                                # 這裡依然傳送明文密碼給 save_user 函數，因為它會在內部自動進行加密再儲存
                                 save_user(r_user, final_pw)
                                 st.success(f"✅ 註冊成功！系統已將密碼寄送至 `{r_user}`，請前往收信並切換到「會員登入」。")
                                 st.balloons()
@@ -232,7 +250,7 @@ if page == "📝 模擬測驗":
                 ans = st.multiselect("請選擇答案", ["A", "B", "C", "D"], key=form_key, disabled=st.session_state.submitted)
                 st.session_state.user_answers[i] = "".join(sorted(ans))
             elif row['題型'] == "是非題":
-                ans = st.radio("請判斷對錯", ["T", "F"], index=None, key=form_key, disabled=st.session_state.submitted)
+                ans = st.radio("請判判断對錯", ["T", "F"], index=None, key=form_key, disabled=st.session_state.submitted)
                 st.session_state.user_answers[i] = ans
             else:
                 ans = st.radio("請選擇正確答案", ["A", "B", "C", "D"], index=None, key=form_key, disabled=st.session_state.submitted)
